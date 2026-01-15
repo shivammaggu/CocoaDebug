@@ -163,7 +163,7 @@
                             <barButtonItem image="hammer.fill" catalog="system" id="Sxa-Bs-wd9">
                                 <color key="tintColor" systemColor="systemGreenColor"/>
                                 <connections>
-                                    <action selector="didTapDeveloper:" destination="C9A-fD-Ood" id="OPq-wP-ThD"/>
+                                    <action selector="didTapHammer:" destination="C9A-fD-Ood" id="Yu3-ri-vIX"/>
                                 </connections>
                             </barButtonItem>
                         </leftBarButtonItems>
