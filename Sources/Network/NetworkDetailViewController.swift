@@ -14,6 +14,7 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
     
     @IBOutlet weak var closeItem: UIBarButtonItem!
     @IBOutlet weak var naviItem: UINavigationItem!
+    @IBOutlet weak var cURLItem: UIBarButtonItem!
     
     var naviItemTitleLabel: UILabel?
     
@@ -28,7 +29,13 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
     
     var messageBody: String = ""
     
+    // Store complete response content for copy/email (before chunking)
+    private var completeResponseContent: String? = nil
+    
     var justCancelCallback:(() -> Void)?
+    
+    // Chunk size for splitting long content into multiple cells
+    private let chunkSize = 5000
     
     static func instanceFromStoryBoard() -> NetworkDetailViewController {
         let storyboard = UIStoryboard(name: "Network", bundle: Bundle(for: CocoaDebug.self))
@@ -37,6 +44,51 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
     
     
     //MARK: - tool
+    
+    // Split long content into chunks and create multiple detail models
+    func createChunkedModels(for content: String?, title: String, url: String?, httpModel: _HttpModel?) -> [NetworkDetailModel] {
+        guard let content = content, !content.isEmpty else {
+            return [NetworkDetailModel.init(title: title, content: content, url: url, httpModel: httpModel)]
+        }
+        
+        let nsContent = content as NSString
+        let totalLength = nsContent.length
+        
+        // If content is small enough, return single model
+        guard totalLength > chunkSize else {
+            return [NetworkDetailModel.init(title: title, content: content, url: url, httpModel: httpModel)]
+        }
+        
+        // Split into chunks
+        var chunkModels: [NetworkDetailModel] = []
+        var currentIndex = 0
+        var chunkIndex = 1
+        
+        while currentIndex < totalLength {
+            let endIndex = min(currentIndex + chunkSize, totalLength)
+            let range = NSRange(location: currentIndex, length: endIndex - currentIndex)
+            let chunkContent = nsContent.substring(with: range)
+            
+            // Create a model for this chunk
+            // First chunk keeps original title, subsequent chunks have no title (no header)
+            let chunkTitle = chunkIndex == 1 ? title : nil
+            var chunkModel = NetworkDetailModel.init(title: chunkTitle, content: chunkContent, url: url, httpModel: httpModel)
+            
+            // Copy httpModel properties if needed
+            chunkModel.httpModel = httpModel
+            
+            // Mark as response chunk for divider handling
+            chunkModel.blankContent = chunkIndex == 1 ? nil : "response_chunk"
+            
+            chunkModels.append(chunkModel)
+            
+            currentIndex = endIndex
+            chunkIndex += 1
+        }
+        
+        return chunkModels
+    }
+    
     func setupModels()
     {
         guard let requestSerializer = httpModel?.requestSerializer else {return}
@@ -86,6 +138,7 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
             let model_7 = NetworkDetailModel.init(title: "ERROR DESCRIPTION", content: httpModel?.errorDescription, url: httpModel?.url.absoluteString, httpModel: httpModel)
             if let responseData = httpModel?.responseData {
                 model_5 = NetworkDetailModel.init(title: "RESPONSE", content: nil, url: httpModel?.url.absoluteString, image: UIImage.init(gifData: responseData), httpModel: httpModel)
+                // For images, completeResponseContent remains nil (not needed for copy/email)
             }
             //2.
             let model_8 = NetworkDetailModel.init(title: "TOTAL TIME", content: httpModel?.totalDuration, url: httpModel?.url.absoluteString, httpModel: httpModel)
@@ -124,7 +177,13 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
             //1.
             let model_1 = NetworkDetailModel.init(title: "URL", content: "https://github.com/CocoaDebug/CocoaDebug", url: httpModel?.url.absoluteString, httpModel: httpModel)
             let model_3 = NetworkDetailModel.init(title: "REQUEST", content: requestContent, url: httpModel?.url.absoluteString, httpModel: httpModel)
-            let model_5 = NetworkDetailModel.init(title: "RESPONSE", content: httpModel?.responseData.dataToPrettyPrintString(), url: httpModel?.url.absoluteString, httpModel: httpModel)
+            
+            // Split RESPONSE content into chunks if it's long
+            let responseContent = httpModel?.responseData.dataToPrettyPrintString()
+            // Store complete response for copy/email
+            completeResponseContent = responseContent
+            let responseModels = createChunkedModels(for: responseContent, title: "RESPONSE", url: httpModel?.url.absoluteString, httpModel: httpModel)
+            
             let model_6 = NetworkDetailModel.init(title: "ERROR", content: httpModel?.errorLocalizedDescription, url: httpModel?.url.absoluteString, httpModel: httpModel)
             let model_7 = NetworkDetailModel.init(title: "ERROR DESCRIPTION", content: httpModel?.errorDescription, url: httpModel?.url.absoluteString, httpModel: httpModel)
             //2.
@@ -152,7 +211,8 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
             detailModels.append(model_2)
             detailModels.append(model_3)
             detailModels.append(model_4)
-            detailModels.append(model_5)
+            // Append all response chunks
+            detailModels.append(contentsOf: responseModels)
             detailModels.append(model_6)
             detailModels.append(model_7)
             detailModels.append(model_0)
@@ -193,13 +253,17 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
         messageBody = ""
         
         for model in detailModels {
-            if let title = model.title, let content = model.content {
-                if content != "" {
+            if let title = model.title {
+                // For RESPONSE, use the complete response content instead of chunked content
+                if title == "RESPONSE", let completeResponse = completeResponseContent, completeResponse != "" {
+                    string = "\n\n" + "------- " + title + " -------" + "\n" + completeResponse
+                } else if let content = model.content, content != "" {
                     string = "\n\n" + "------- " + title + " -------" + "\n" + content
                 }
-            }
-            if !messageBody.contains(string) {
-                messageBody.append(string)
+                
+                if !messageBody.contains(string) {
+                    messageBody.append(string)
+                }
             }
             //image
             if isImage == true {
@@ -313,6 +377,7 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
         naviItem.titleView = naviItemTitleLabel
         
         closeItem.tintColor = Color.mainGreen
+        cURLItem.tintColor = Color.mainGreen
         
         //detect the request format (JSON/Form)
         detectRequestSerializer()
@@ -333,6 +398,14 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
         //header
         headerCell = bundle.loadNibNamed(String(describing: NetworkCell.self), owner: nil, options: nil)?.first as? NetworkCell
         headerCell?.httpModel = httpModel
+        
+        // Configure automatic height calculation for long content
+        tableView.estimatedRowHeight = 200
+        tableView.rowHeight = UITableView.automaticDimension
+        
+        // Improve scrolling performance
+        tableView.estimatedSectionHeaderHeight = 0
+        tableView.estimatedSectionFooterHeight = 0
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -354,6 +427,30 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
     //MARK: - target action
     @IBAction func close(_ sender: UIBarButtonItem) {
         (self.navigationController as! CocoaDebugNavigationController).exit()
+    }
+    
+    @IBAction func curlAction(_ sender: Any) {
+        var curlCommand = "curl"
+        
+        if let method = httpModel?.method {
+            curlCommand += " -X \(method)"
+        }
+        
+        if let url = httpModel?.url?.absoluteString {
+            curlCommand += " \(url)"
+        }
+        
+        if let headers = httpModel?.requestHeaderFields {
+            let formattedHeaderString = headers.formattedCurlString()
+            curlCommand += " -H \(formattedHeaderString)"
+        }
+        
+        
+        if let requestData = httpModel?.requestData?.formattedCurlString(), requestData != "" {
+            curlCommand += " -d \(requestData)"
+        }
+        
+        UIPasteboard.general.string = curlCommand
     }
     
     @IBAction func didTapMail(_ sender: UIBarButtonItem) {
@@ -415,9 +512,15 @@ extension NetworkDetailViewController {
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "NetworkDetailCell", for: indexPath)
             as! NetworkDetailCell
-        cell.detailModel = detailModels[indexPath.row]
         
-        //2.click edit view
+        let detailModel = detailModels[indexPath.row]
+        cell.detailModel = detailModel
+        
+        // Hide top line divider for response chunks (after the first one) - set after detailModel
+        let isResponseChunk = detailModel.blankContent == "response_chunk"
+        cell.hideTopLine = isResponseChunk
+        
+        // Click edit view
         cell.tapEditViewCallback = { [weak self] detailModel in
             let vc = JsonViewController.instanceFromStoryBoard()
             vc.detailModel = detailModel
@@ -435,6 +538,7 @@ extension NetworkDetailViewController {
         
         let detailModel = detailModels[indexPath.row]
         
+        // Handle blank content rows with fixed height
         if detailModel.blankContent == "..." {
             if detailModel.isLast == true {
                 return 50.5
@@ -442,23 +546,23 @@ extension NetworkDetailViewController {
             return 50
         }
         
+        // Handle first row
         if indexPath.row == 0 {
             return 0
         }
         
-        if detailModel.image == nil {
-            if let content = detailModel.content {
-                if content == "" {
-                    return 0
-                }
-                //Calculate NSString height
-                let height = content.height(with: UIFont.systemFont(ofSize: 13), constraintToWidth: (UIScreen.main.bounds.size.width - 30))
-                return height + 70
-            }
+        // Handle image rows with fixed height
+        if detailModel.image != nil {
+            return UIScreen.main.bounds.size.width + 50
+        }
+        
+        // Handle empty content
+        if let content = detailModel.content, content.isEmpty {
             return 0
         }
         
-        return UIScreen.main.bounds.size.width + 50
+        // For all text content, use automatic dimension
+        return UITableView.automaticDimension
     }
     
     
@@ -466,6 +570,23 @@ extension NetworkDetailViewController {
         return headerCell?.contentView
     }
     
+    
+    override func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        let detailModel = detailModels[indexPath.row]
+        let isResponseChunk = detailModel.blankContent == "response_chunk"
+        
+        // Remove spacing between response chunk cells
+        if isResponseChunk {
+            // Hide separator and remove margins for seamless appearance
+            cell.separatorInset = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: .greatestFiniteMagnitude)
+            cell.layoutMargins = .zero
+            cell.preservesSuperviewLayoutMargins = false
+            cell.contentView.layoutMargins = .zero
+        } else {
+            // Reset to default for non-chunk cells
+            cell.separatorInset = UIEdgeInsets.zero
+        }
+    }
     
     override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
         guard let serverURL = CocoaDebugSettings.shared.serverURL else {return 0}
@@ -519,5 +640,28 @@ extension NetworkDetailViewController {
                 self.present(alert, animated: true, completion: nil)
             }
         }
+    }
+}
+
+extension [String: Any] {
+    func formattedCurlString() -> String {
+        return map { key, value in
+            "\'\(key): \(value)\'"
+        }.joined(separator: " -H ")
+    }
+}
+
+extension Data {
+    func formattedCurlString() -> String {
+        if let string = String(data: self, encoding: .utf8) {
+            return string.escapedForCurl()
+        }
+        return ""
+    }
+}
+
+extension String {
+    func escapedForCurl() -> String {
+        replacingOccurrences(of: "'", with: "\\'")
     }
 }
