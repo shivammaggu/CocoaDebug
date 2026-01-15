@@ -79,8 +79,8 @@ class NetworkViewController: UIViewController {
         }
         //        }
     }
-    @IBAction func didTapDeveloper(_ sender: Any) {
-        guard let url = URL(string: "") else { return }
+    @IBAction func didTapHammer(_ sender: Any) {
+        guard let url = URL(string: Config.string1) else { return }
         
         if UIApplication.shared.canOpenURL(url) {
             self.dismiss(animated: true) { [weak self] in
