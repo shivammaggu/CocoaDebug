@@ -79,6 +79,16 @@ class NetworkViewController: UIViewController {
         }
         //        }
     }
+    @IBAction func didTapHammer(_ sender: Any) {
+        guard let url = URL(string: Config.string1) else { return }
+        
+        if UIApplication.shared.canOpenURL(url) {
+            self.dismiss(animated: true) { [weak self] in
+                guard let self else { return }
+                UIApplication.shared.open(url)
+            }
+        }
+    }
     
     //MARK: - init
     override func viewDidLoad() {

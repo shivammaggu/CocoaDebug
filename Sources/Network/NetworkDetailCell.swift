@@ -20,9 +20,15 @@ class NetworkDetailCell: UITableViewCell {
     @IBOutlet weak var bottomLine: UIView!
     @IBOutlet weak var editView: UIView!
     
+    @IBOutlet weak var contextTextTopConstraint: NSLayoutConstraint!
     @IBOutlet weak var titleViewBottomSpaceToMiddleLine: NSLayoutConstraint!
     //-12.5
     
+    var hideTopLine: Bool = false {
+        didSet {
+            topLine.isHidden = hideTopLine
+        }
+    }
     
     var tapEditViewCallback:((NetworkDetailModel?) -> Void)?
     
@@ -32,6 +38,9 @@ class NetworkDetailCell: UITableViewCell {
             titleLabel.text = detailModel?.title
             contentTextView.text = detailModel?.content
             
+            // Disable scrolling - we use table view scrolling with dynamic height
+            contentTextView.isScrollEnabled = false
+            
             //image
             if detailModel?.image == nil {
                 imgView.isHidden = true
@@ -40,17 +49,35 @@ class NetworkDetailCell: UITableViewCell {
                 imgView.image = detailModel?.image
             }
             
-            //Hide content automatically
-            if detailModel?.blankContent == "..." {
+            // Hide title view and divider for response chunks (no header)
+            let isResponseChunk = detailModel?.blankContent == "response_chunk"
+            let hasNoTitle = detailModel?.title == nil || detailModel?.title?.isEmpty == true
+            
+            if hasNoTitle || isResponseChunk {
+                // Hide header for chunks and remove spacing
+                titleView.isHidden = true
+                middleLine.isHidden = true
+                // topLine visibility is controlled by hideTopLine property (set externally)
+                titleViewBottomSpaceToMiddleLine.constant = 0
+                
+                // Remove top spacing/padding for response chunks
+                contentTextView.textContainerInset = UIEdgeInsets.zero
+                contextTextTopConstraint.isActive = true
+            } else if detailModel?.blankContent == "..." {
+                // Hide content automatically
                 middleLine.isHidden = true
                 imgView.isHidden = true
                 titleViewBottomSpaceToMiddleLine.constant = -12.5 + 2
             } else {
+                // Normal content with title
+                titleView.isHidden = false
                 middleLine.isHidden = false
+                topLine.isHidden = false
                 if detailModel?.image != nil {
                     imgView.isHidden = false
                 }
                 titleViewBottomSpaceToMiddleLine.constant = 0
+                contextTextTopConstraint.isActive = false
             }
             
             //Bottom dividing line
@@ -70,6 +97,15 @@ class NetworkDetailCell: UITableViewCell {
         
         contentTextView.textContainer.lineFragmentPadding = 0
         contentTextView.textContainerInset = .zero
+        contentTextView.isScrollEnabled = false
+        
+        // Optimize for better performance
+        contentTextView.layoutManager.allowsNonContiguousLayout = true
+        
+        // Remove default cell spacing
+        separatorInset = UIEdgeInsets.zero
+        layoutMargins = .zero
+        preservesSuperviewLayoutMargins = false
     }
     
     
@@ -79,5 +115,9 @@ class NetworkDetailCell: UITableViewCell {
         if let tapEditViewCallback = tapEditViewCallback {
             tapEditViewCallback(detailModel)
         }
+    }
+    
+    override func prepareForReuse() {
+        super.prepareForReuse()
     }
 }
