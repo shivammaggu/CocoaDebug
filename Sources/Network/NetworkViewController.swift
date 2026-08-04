@@ -19,7 +19,8 @@ class NetworkViewController: UIViewController {
     var searchModels: Array<_HttpModel>?
     
     var naviItemTitleLabel: UILabel?
-    
+    private var didCombineGlassBar = false
+
     @IBOutlet weak var tableView: UITableView!
     @IBOutlet weak var searchBar: UISearchBar!
     @IBOutlet weak var deleteItem: UIBarButtonItem!
@@ -103,7 +104,7 @@ class NetworkViewController: UIViewController {
         naviItemTitleLabel?.textColor = Color.mainGreen
         naviItemTitleLabel?.font = .boldSystemFont(ofSize: 20)
         naviItem.titleView = naviItemTitleLabel
-        
+
         naviItemTitleLabel?.text = "🚀[0]"
         deleteItem.tintColor = Color.mainGreen
         
@@ -142,8 +143,58 @@ class NetworkViewController: UIViewController {
     
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        if #available(iOS 26.0, *) { combineBarItemsForGlass() }
     }
-    
+
+    // iOS 26's glass nav bar gives each bar button item a wide slot + generous spacing,
+    // which starves the centered 🚀[count] titleView and collapses the extra items into a
+    // "•••" overflow menu. Pack the auxiliary buttons into two grouped customView slots
+    // ([up,hammer] and [trash,down]) so the bar has few wide slots and the count keeps its
+    // center space. Mirrors the host app's own ind_combined approach.
+    @available(iOS 26.0, *)
+    private func combineBarItemsForGlass() {
+        guard !didCombineGlassBar else { return }
+        let left = navigationItem.leftBarButtonItems ?? []
+        let right = navigationItem.rightBarButtonItems ?? []
+        // Expected after the nav controller prepends the close button:
+        // left = [closeX, up, hammer], right = [trash, down]
+        guard left.count >= 3, right.count >= 2 else { return }
+        didCombineGlassBar = true
+
+        let closeX = left[0]
+        let leftGroup = combinedGroup(Array(left[1...]))
+        // A single trailing group renders its stack left-to-right, but the original
+        // right items [trash, down] rendered as "down, trash" (trash at the edge).
+        // Reverse so the combined stack preserves the original visual order.
+        let rightGroup = combinedGroup(Array(right.reversed()))
+        navigationItem.leftBarButtonItems = [closeX, leftGroup]
+        navigationItem.rightBarButtonItems = [rightGroup]
+    }
+
+    @available(iOS 26.0, *)
+    private func combinedGroup(_ items: [UIBarButtonItem]) -> UIBarButtonItem {
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 20
+        for it in items {
+            let button = UIButton(type: .system)
+            button.tintColor = Color.mainGreen
+            if let img = it.image {
+                button.setImage(img, for: .normal)
+            } else if it.action == #selector(tapTrashButton(_:)) {
+                button.setImage(UIImage(systemName: "trash"), for: .normal)
+            }
+            if let target = it.target, let action = it.action {
+                button.addTarget(target, action: action, for: .touchUpInside)
+            }
+            stack.addArrangedSubview(button)
+        }
+        let group = UIBarButtonItem(customView: stack)
+        group.hidesSharedBackground = true
+        return group
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         searchBar.resignFirstResponder()
@@ -182,6 +233,7 @@ class NetworkViewController: UIViewController {
         //        dispatch_main_async_safe { [weak self] in
         self.tableView.reloadData()
         self.naviItemTitleLabel?.text = "🚀[0]"
+        self.naviItemTitleLabel?.sizeToFit()
         //        }
         
         NotificationCenter.default.post(name: NSNotification.Name("deleteAllLogs_CocoaDebug"), object: nil, userInfo: nil)
@@ -198,6 +250,7 @@ extension NetworkViewController: UITableViewDataSource {
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         if let count = models?.count {
             naviItemTitleLabel?.text = "🚀[" + String(count) + "]"
+            naviItemTitleLabel?.sizeToFit()
             return count
         }
         return 0
@@ -305,4 +358,3 @@ extension NetworkViewController: UISearchBarDelegate {
         //        }
     }
 }
-
