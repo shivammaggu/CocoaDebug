@@ -150,11 +150,7 @@
                     <navigationItem key="navigationItem" title="Network" id="npy-bN-DLs">
                         <barButtonItem key="backBarButtonItem" title=" " id="kaw-fV-cgo"/>
                         <leftBarButtonItems>
-                            <barButtonItem id="oae-CE-MYL">
-                                <connections>
-                                    <action selector="didTapDown:" destination="C9A-fD-Ood" id="gBt-b7-jTb"/>
-                                </connections>
-                            </barButtonItem>
+                            
                             <barButtonItem image="_icon_file_type_up.png" id="Rna-qw-hSf">
                                 <connections>
                                     <action selector="didTapUp:" destination="C9A-fD-Ood" id="MiC-y5-dZp"/>
