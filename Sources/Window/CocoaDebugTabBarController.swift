@@ -83,18 +83,34 @@ class CocoaDebugTabBarController: UITabBarController {
 
         //****** copy codes from LogNavigationViewController.swift ******
         nav.navigationBar.isTranslucent = false
-        
+
         nav.navigationBar.tintColor = Color.mainGreen
         nav.navigationBar.titleTextAttributes = [.font: UIFont.boldSystemFont(ofSize: 20),
                                                  .foregroundColor: Color.mainGreen]
-        
+
+        //iOS 26: force opaque bg so bar doesn't fall back to Liquid Glass
+        if #available(iOS 13, *) {
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = "#1f2124".hexColor
+            appearance.shadowColor = .clear
+            appearance.titleTextAttributes = [.font: UIFont.boldSystemFont(ofSize: 20),
+                                              .foregroundColor: Color.mainGreen]
+            nav.navigationBar.standardAppearance = appearance
+            nav.navigationBar.scrollEdgeAppearance = appearance
+            nav.navigationBar.compactAppearance = appearance
+        }
+
         let selector = #selector(CocoaDebugNavigationController.exit)
-        
-        
+
+
         let image = UIImage(named: "_icon_file_type_close", in: Bundle(for: CocoaDebugNavigationController.self), compatibleWith: nil)
         let leftItem = UIBarButtonItem(image: image,
                                        style: .done, target: self, action: selector)
         leftItem.tintColor = Color.mainGreen
+        if #available(iOS 26.0, *) {
+            leftItem.hidesSharedBackground = true
+        }
         nav.topViewController?.navigationItem.leftBarButtonItem = leftItem
         //****** copy codes from LogNavigationViewController.swift ******
         
