@@ -141,10 +141,9 @@ class NetworkDetailCell: UITableViewCell {
         return found
     }
 
-    //Call after assigning detailModel. Every occurrence of `query` is highlighted; `current`
-    //(the match the up/down arrows are parked on) gets a stronger colour. Empty query restores
-    //the plain rendering.
-    func highlight(_ query: String, current: NSRange? = nil) {
+    //Call after assigning detailModel. Every occurrence of `query` is highlighted; an empty
+    //query restores the plain rendering.
+    func highlight(_ query: String) {
         guard let content = detailModel?.content, !content.isEmpty else {return}
 
         let base: [NSAttributedString.Key: Any] = [
@@ -162,8 +161,7 @@ class NetworkDetailCell: UITableViewCell {
         let attributed = NSMutableAttributedString(string: content, attributes: base)
 
         for match in NetworkDetailCell.ranges(of: query, in: content) {
-            let isCurrent = current.map { NSEqualRanges($0, match) } ?? false
-            attributed.addAttributes([.backgroundColor: isCurrent ? UIColor.systemOrange : UIColor.systemYellow,
+            attributed.addAttributes([.backgroundColor: UIColor.systemYellow,
                                       .foregroundColor: UIColor.black], range: match)
         }
 
