@@ -43,6 +43,26 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
     // searched independently. Search the unchunked content if that ever bites.
     private var unfilteredModels: [NetworkDetailModel] = []
     private var searchQuery: String = ""
+
+    // The search bar rides INSIDE the section header, not in tableHeaderView (which scrolls
+    // away) and not in navigationItem.searchController (starved by iOS 26's glass bar on this
+    // screen — 3 right bar items plus a custom titleView). This table is plain-style, so its
+    // section header floats: that is already what keeps the URL/status block pinned while you
+    // scroll, and the search bar now inherits it.
+    private let searchBarHeight: CGFloat = 56
+    private lazy var searchBar: UISearchBar = {
+        let bar = UISearchBar()
+        bar.delegate = self
+        bar.placeholder = "Search in details"
+        bar.barStyle = .black
+        bar.tintColor = Color.mainGreen
+        return bar
+    }()
+    private lazy var headerContainer: UIView = {
+        let container = UIView()
+        container.backgroundColor = .black
+        return container
+    }()
     
     static func instanceFromStoryBoard() -> NetworkDetailViewController {
         let storyboard = UIStoryboard(name: "Network", bundle: Bundle(for: CocoaDebug.self))
@@ -399,17 +419,9 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
 
         unfilteredModels = detailModels
 
-        // ponytail: table-header UISearchBar, not navigationItem.searchController — this
-        // screen already has 3 right bar items + a custom titleView, and iOS 26's glass
-        // nav bar starves extra slots (see NetworkViewController.combineBarItemsForGlass).
-        // Same pattern the network list screen uses.
-        let searchBar = UISearchBar(frame: CGRect(x: 0, y: 0, width: tableView.bounds.width, height: 56))
-        searchBar.autoresizingMask = .flexibleWidth
-        searchBar.delegate = self
-        searchBar.placeholder = "Search in details"
-        searchBar.barStyle = .black
-        searchBar.tintColor = Color.mainGreen
-        tableView.tableHeaderView = searchBar
+        //dragging the list dismisses the keyboard; the Cancel button and the keyboard's
+        //Search key do it too (searchBarCancelButtonClicked / searchBarSearchButtonClicked)
+        tableView.keyboardDismissMode = .onDrag
 
         //Use a separate xib-cell file, must be registered, otherwise it will crash
         let bundle = Bundle(for: type(of: self))
@@ -530,6 +542,22 @@ extension NetworkDetailViewController: UISearchBarDelegate {
         searchBar.resignFirstResponder()
     }
 
+    //Cancel is only offered while editing, so it never eats width from the field otherwise
+    func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
+        searchBar.setShowsCancelButton(true, animated: true)
+    }
+
+    func searchBarTextDidEndEditing(_ searchBar: UISearchBar) {
+        searchBar.setShowsCancelButton(false, animated: true)
+    }
+
+    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.text = nil
+        searchBar.resignFirstResponder()
+        //clears the filter and the highlighting too
+        self.searchBar(searchBar, textDidChange: "")
+    }
+
     func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
         let query = searchText.trimmingCharacters(in: .whitespaces)
         searchQuery = query
@@ -614,7 +642,28 @@ extension NetworkDetailViewController {
     
     
     override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-        return headerCell?.contentView
+        guard let content = headerCell?.contentView else {return searchBar}
+
+        if searchBar.superview !== headerContainer {
+            searchBar.translatesAutoresizingMaskIntoConstraints = false
+            content.translatesAutoresizingMaskIntoConstraints = false
+            headerContainer.addSubview(searchBar)
+            headerContainer.addSubview(content)
+
+            NSLayoutConstraint.activate([
+                searchBar.topAnchor.constraint(equalTo: headerContainer.topAnchor),
+                searchBar.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor),
+                searchBar.trailingAnchor.constraint(equalTo: headerContainer.trailingAnchor),
+                searchBar.heightAnchor.constraint(equalToConstant: searchBarHeight),
+
+                content.topAnchor.constraint(equalTo: searchBar.bottomAnchor),
+                content.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor),
+                content.trailingAnchor.constraint(equalTo: headerContainer.trailingAnchor),
+                content.bottomAnchor.constraint(equalTo: headerContainer.bottomAnchor)
+            ])
+        }
+
+        return headerContainer
     }
     
     
@@ -636,6 +685,12 @@ extension NetworkDetailViewController {
     }
     
     override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
+        //the search bar is part of this header, so it must be counted even when the URL
+        //block measures to 0 — otherwise the header collapses and the search bar vanishes
+        return urlHeaderHeight() + searchBarHeight
+    }
+
+    private func urlHeaderHeight() -> CGFloat {
         guard let serverURL = CocoaDebugSettings.shared.serverURL else {return 0}
         
         var height: CGFloat = 0.0
