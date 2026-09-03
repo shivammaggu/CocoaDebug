@@ -21,6 +21,10 @@ class NetworkViewController: UIViewController {
     var naviItemTitleLabel: UILabel?
     private var didCombineGlassBar = false
 
+    // nil = no method filter. ponytail: not persisted in CocoaDebugSettings — resets when the
+    // debugger is reopened, which is what you want from a transient filter.
+    private var methodFilter: String?
+
     @IBOutlet weak var tableView: UITableView!
     @IBOutlet weak var searchBar: UISearchBar!
     @IBOutlet weak var deleteItem: UIBarButtonItem!
@@ -30,22 +34,14 @@ class NetworkViewController: UIViewController {
     //搜索逻辑
     func searchLogic(_ searchText: String = "") {
         guard let cacheModels = cacheModels else {return}
-        searchModels = cacheModels
-        
-        if searchText == "" {
-            models = cacheModels
-        } else {
-            guard let searchModels = searchModels else {return}
-            
-            for _ in searchModels {
-                if let index = self.searchModels?.firstIndex(where: { (model) -> Bool in
-                    return !model.url.absoluteString.lowercased().contains(searchText.lowercased())//忽略大小写
-                }) {
-                    self.searchModels?.remove(at: index)
-                }
-            }
-            models = self.searchModels
+
+        //忽略大小写
+        let keyword = searchText.lowercased()
+        searchModels = cacheModels.filter { model in
+            (keyword.isEmpty || model.url.absoluteString.lowercased().contains(keyword))
+                && (methodFilter == nil || model.method.uppercased() == methodFilter)
         }
+        models = searchModels
     }
     
     //MARK: - private
@@ -126,6 +122,11 @@ class NetworkViewController: UIViewController {
         searchBar.delegate = self
         searchBar.text = CocoaDebugSettings.shared.networkSearchWord
         searchBar.isHidden = true
+
+        // HTTP-method filter lives on the search bar's built-in bookmark button: no new bar
+        // button item (that would break combineBarItemsForGlass's hardcoded item layout) and
+        // no scope bar (the storyboard pins this bar to 44pt and the table's top to a matching 44).
+        searchBar.showsBookmarkButton = true
         
         //hide searchBar icon
         let textFieldInsideSearchBar = searchBar.value(forKey: "searchField") as! UITextField
@@ -249,7 +250,8 @@ extension NetworkViewController: UITableViewDataSource {
     
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         if let count = models?.count {
-            naviItemTitleLabel?.text = "🚀[" + String(count) + "]"
+            //active method filter is shown here so it is never invisible
+            naviItemTitleLabel?.text = "🚀[" + String(count) + "]" + (methodFilter.map { " " + $0 } ?? "")
             naviItemTitleLabel?.sizeToFit()
             return count
         }
@@ -352,9 +354,40 @@ extension NetworkViewController: UISearchBarDelegate {
     {
         CocoaDebugSettings.shared.networkSearchWord = searchText
         searchLogic(searchText)
-        
+
         //        dispatch_main_async_safe { [weak self] in
         self.tableView.reloadData()
         //        }
+    }
+
+    //filter by HTTP method. "All" clears it; the active one is checked here and shown in the navi title.
+    func searchBarBookmarkButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.resignFirstResponder()
+
+        //only offer methods actually present in the captured traffic, plus whatever is already
+        //selected (the trash button can empty out the method you are filtering on)
+        let methods = Set((cacheModels ?? []).map { $0.method.uppercased() })
+            .union(methodFilter.map { [$0] } ?? [])
+            .sorted()
+
+        let alert = UIAlertController(title: "Filter by HTTP method", message: nil, preferredStyle: .actionSheet)
+
+        for title in ["All"] + methods {
+            let isActive = (title == "All") ? methodFilter == nil : methodFilter == title
+            let action = UIAlertAction(title: (isActive ? "✓ " : "") + title, style: .default) { [weak self] _ in
+                self?.methodFilter = (title == "All") ? nil : title
+                self?.searchLogic(searchBar.text ?? "")
+                self?.tableView.reloadData()
+            }
+            alert.addAction(action)
+        }
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        alert.popoverPresentationController?.permittedArrowDirections = .init(rawValue: 0)
+        alert.popoverPresentationController?.sourceView = self.view
+        alert.popoverPresentationController?.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.midY, width: 0, height: 0)
+
+        present(alert, animated: true, completion: nil)
     }
 }
