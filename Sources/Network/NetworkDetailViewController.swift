@@ -37,10 +37,12 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
     // Chunk size for splitting long content into multiple cells
     private let chunkSize = 5000
 
-    // ponytail: search = filter sections down to the ones containing the text.
-    // No in-cell match highlighting, and a match straddling two response chunks
-    // is missed — highlight/attributed-string pass in NetworkDetailCell if that matters.
+    // Search filters the sections down to the ones containing the text, and every match inside
+    // them is highlighted by the cell.
+    // ponytail: a match straddling two response chunks is still missed — the chunks are
+    // searched independently. Search the unchunked content if that ever bites.
     private var unfilteredModels: [NetworkDetailModel] = []
+    private var searchQuery: String = ""
     
     static func instanceFromStoryBoard() -> NetworkDetailViewController {
         let storyboard = UIStoryboard(name: "Network", bundle: Bundle(for: CocoaDebug.self))
@@ -530,6 +532,7 @@ extension NetworkDetailViewController: UISearchBarDelegate {
 
     func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
         let query = searchText.trimmingCharacters(in: .whitespaces)
+        searchQuery = query
 
         if query.isEmpty {
             detailModels = unfilteredModels
@@ -558,7 +561,8 @@ extension NetworkDetailViewController {
         
         let detailModel = detailModels[indexPath.row]
         cell.detailModel = detailModel
-        
+        cell.highlight(searchQuery)
+
         // Hide top line divider for response chunks (after the first one) - set after detailModel
         let isResponseChunk = detailModel.blankContent == "response_chunk"
         cell.hideTopLine = isResponseChunk

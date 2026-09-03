@@ -31,7 +31,12 @@ class NetworkDetailCell: UITableViewCell {
     }
     
     var tapEditViewCallback:((NetworkDetailModel?) -> Void)?
-    
+
+    //captured once: assigning attributedText can overwrite the text view's own font/textColor,
+    //and the storyboard values are the only record of them (white-on-black would go black-on-black)
+    private var baseFont: UIFont?
+    private var baseTextColor: UIColor?
+
     var detailModel: NetworkDetailModel? {
         didSet {
             
@@ -94,7 +99,10 @@ class NetworkDetailCell: UITableViewCell {
         super.awakeFromNib()
         
         editView.addGestureRecognizer(UITapGestureRecognizer.init(target: self, action: #selector(tapEditView)))
-        
+
+        baseFont = contentTextView.font
+        baseTextColor = contentTextView.textColor
+
         contentTextView.textContainer.lineFragmentPadding = 0
         contentTextView.textContainerInset = .zero
         contentTextView.isScrollEnabled = false
@@ -109,6 +117,42 @@ class NetworkDetailCell: UITableViewCell {
     }
     
     
+    //MARK: - search highlighting
+    //Call after assigning detailModel. Every occurrence of `query` in the content gets a
+    //highlight; an empty query restores the plain rendering.
+    func highlight(_ query: String) {
+        guard let content = detailModel?.content, !content.isEmpty else {return}
+
+        let base: [NSAttributedString.Key: Any] = [
+            .font: baseFont ?? contentTextView.font ?? UIFont.systemFont(ofSize: 13),
+            .foregroundColor: baseTextColor ?? contentTextView.textColor ?? .white
+        ]
+
+        guard !query.isEmpty else {
+            //restore: detailModel's setter already assigned .text, but a previous
+            //attributedText may have left the font/colour on the matched word
+            contentTextView.attributedText = NSAttributedString(string: content, attributes: base)
+            return
+        }
+
+        let attributed = NSMutableAttributedString(string: content, attributes: base)
+        let nsContent = content as NSString
+        var searchRange = NSRange(location: 0, length: nsContent.length)
+
+        while searchRange.length > 0 {
+            let found = nsContent.range(of: query, options: .caseInsensitive, range: searchRange)
+            if found.location == NSNotFound {break}
+
+            attributed.addAttributes([.backgroundColor: UIColor.systemYellow,
+                                      .foregroundColor: UIColor.black], range: found)
+
+            let next = found.location + found.length
+            searchRange = NSRange(location: next, length: nsContent.length - next)
+        }
+
+        contentTextView.attributedText = attributed
+    }
+
     //MARK: - target action
     //edit
     @objc func tapEditView() {

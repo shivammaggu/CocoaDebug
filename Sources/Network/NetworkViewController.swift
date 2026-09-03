@@ -43,7 +43,14 @@ class NetworkViewController: UIViewController {
         }
         models = searchModels
     }
-    
+
+    //filter funnel in the bookmark slot — filled while a method filter is on, so the icon
+    //itself reports the state even if the navi title truncates on iOS 26's glass bar
+    private func updateMethodFilterIcon() {
+        let name = methodFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill"
+        searchBar.setImage(UIImage(systemName: name), for: .bookmark, state: .normal)
+    }
+
     //MARK: - private
     func reloadHttp(needScrollToEnd: Bool = false) {
         
@@ -127,11 +134,13 @@ class NetworkViewController: UIViewController {
         // button item (that would break combineBarItemsForGlass's hardcoded item layout) and
         // no scope bar (the storyboard pins this bar to 44pt and the table's top to a matching 44).
         searchBar.showsBookmarkButton = true
+        updateMethodFilterIcon()
         
-        //hide searchBar icon
-        let textFieldInsideSearchBar = searchBar.value(forKey: "searchField") as! UITextField
-        textFieldInsideSearchBar.leftViewMode = .never
-        textFieldInsideSearchBar.leftView = nil
+        //keep the magnifier: it used to be stripped here, which left this bar the only search
+        //field in the debugger without one. searchTextField is the iOS 13+ API for what was a
+        //`value(forKey: "searchField") as! UITextField` force-cast.
+        let textFieldInsideSearchBar = searchBar.searchTextField
+        textFieldInsideSearchBar.leftViewMode = .always
         textFieldInsideSearchBar.backgroundColor = .white
         textFieldInsideSearchBar.returnKeyType = .default
         
@@ -376,6 +385,7 @@ extension NetworkViewController: UISearchBarDelegate {
             let isActive = (title == "All") ? methodFilter == nil : methodFilter == title
             let action = UIAlertAction(title: (isActive ? "✓ " : "") + title, style: .default) { [weak self] _ in
                 self?.methodFilter = (title == "All") ? nil : title
+                self?.updateMethodFilterIcon()
                 self?.searchLogic(searchBar.text ?? "")
                 self?.tableView.reloadData()
             }
