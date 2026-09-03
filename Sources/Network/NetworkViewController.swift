@@ -161,6 +161,8 @@ class NetworkViewController: UIViewController {
         //`value(forKey: "searchField") as! UITextField` force-cast.
         let textFieldInsideSearchBar = searchBar.searchTextField
         textFieldInsideSearchBar.leftViewMode = .always
+        //barStyle alone does not reliably give white input text; set it explicitly
+        textFieldInsideSearchBar.textColor = .white
         textFieldInsideSearchBar.returnKeyType = .default
         
         reloadHttp(needScrollToEnd: true)

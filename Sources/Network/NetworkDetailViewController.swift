@@ -56,6 +56,8 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
         bar.placeholder = "Search in details"
         bar.barStyle = .black
         bar.tintColor = Color.mainGreen
+        //barStyle alone does not reliably give white input text; set it explicitly
+        bar.searchTextField.textColor = .white
         return bar
     }()
     private lazy var headerContainer: UIView = {
@@ -679,8 +681,10 @@ extension NetworkDetailViewController: UISearchBarDelegate {
         } else {
             // row 0 is the height-0 URL row the header cell renders — always keep it
             detailModels = Array(unfilteredModels.prefix(1)) + unfilteredModels.dropFirst().filter { model in
+                //content goes through the same scanner as the highlighting and the match
+                //counter, so "section shown" and "section has highlights" cannot disagree
                 (model.title ?? "").localizedCaseInsensitiveContains(query)
-                    || (model.content ?? "").localizedCaseInsensitiveContains(query)
+                    || !NetworkDetailCell.ranges(of: query, in: model.content ?? "").isEmpty
             }
         }
 
