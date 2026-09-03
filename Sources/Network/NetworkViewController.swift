@@ -25,6 +25,9 @@ class NetworkViewController: UIViewController {
     // debugger is reopened, which is what you want from a transient filter.
     private var methodFilter: String?
 
+    // request -> its position in the unfiltered capture list, so the row number is stable
+    private var stableIndex: [ObjectIdentifier: Int] = [:]
+
     @IBOutlet weak var tableView: UITableView!
     @IBOutlet weak var searchBar: UISearchBar!
     @IBOutlet weak var deleteItem: UIBarButtonItem!
@@ -42,6 +45,17 @@ class NetworkViewController: UIViewController {
                 && (methodFilter == nil || model.method.uppercased() == methodFilter)
         }
         models = searchModels
+    }
+
+    //The number drawn on each row is the request's position in the FULL capture list, not its
+    //row in the filtered list — otherwise applying or clearing a filter renumbers every request
+    //and the same call answers to a different number. Keyed by object identity because
+    //`models` is always a subset of the very same _HttpModel instances held in `cacheModels`.
+    private func rebuildStableIndex() {
+        stableIndex = [:]
+        for (position, model) in (cacheModels ?? []).enumerated() {
+            stableIndex[ObjectIdentifier(model)] = position
+        }
     }
 
     //filter funnel in the bookmark slot — filled while a method filter is on, so the icon
@@ -62,7 +76,8 @@ class NetworkViewController: UIViewController {
         
         self.models = (_HttpDatasource.shared().httpModels as NSArray as? [_HttpModel])
         self.cacheModels = self.models
-        
+        self.rebuildStableIndex()
+
         self.searchLogic(CocoaDebugSettings.shared.networkSearchWord ?? "")
         
         //        dispatch_main_async_safe { [weak self] in
@@ -271,8 +286,10 @@ extension NetworkViewController: UITableViewDataSource {
         let cell = tableView.dequeueReusableCell(withIdentifier: "NetworkCell", for: indexPath)
             as! NetworkCell
         
-        cell.httpModel = models?[indexPath.row]
-        cell.index = indexPath.row
+        let model = models?[indexPath.row]
+        cell.httpModel = model
+        //falls back to the row only if the map is stale (nothing should hit this)
+        cell.index = model.flatMap { stableIndex[ObjectIdentifier($0)] } ?? indexPath.row
         return cell
     }
 }
