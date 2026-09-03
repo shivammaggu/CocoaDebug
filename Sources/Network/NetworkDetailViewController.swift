@@ -36,6 +36,11 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
     
     // Chunk size for splitting long content into multiple cells
     private let chunkSize = 5000
+
+    // ponytail: search = filter sections down to the ones containing the text.
+    // No in-cell match highlighting, and a match straddling two response chunks
+    // is missed — highlight/attributed-string pass in NetworkDetailCell if that matters.
+    private var unfilteredModels: [NetworkDetailModel] = []
     
     static func instanceFromStoryBoard() -> NetworkDetailViewController {
         let storyboard = UIStoryboard(name: "Network", bundle: Bundle(for: CocoaDebug.self))
@@ -389,7 +394,21 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
             detailModels.removeLast()
             detailModels.append(lastModel)
         }
-        
+
+        unfilteredModels = detailModels
+
+        // ponytail: table-header UISearchBar, not navigationItem.searchController — this
+        // screen already has 3 right bar items + a custom titleView, and iOS 26's glass
+        // nav bar starves extra slots (see NetworkViewController.combineBarItemsForGlass).
+        // Same pattern the network list screen uses.
+        let searchBar = UISearchBar(frame: CGRect(x: 0, y: 0, width: tableView.bounds.width, height: 56))
+        searchBar.autoresizingMask = .flexibleWidth
+        searchBar.delegate = self
+        searchBar.placeholder = "Search in details"
+        searchBar.barStyle = .black
+        searchBar.tintColor = Color.mainGreen
+        tableView.tableHeaderView = searchBar
+
         //Use a separate xib-cell file, must be registered, otherwise it will crash
         let bundle = Bundle(for: type(of: self))
         let nib = UINib(nibName: "NetworkCell", bundle: bundle)
@@ -499,6 +518,30 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
         
         // present an actionSheet...
         present(alert, animated: true, completion: nil)
+    }
+}
+
+//MARK: - UISearchBarDelegate
+extension NetworkDetailViewController: UISearchBarDelegate {
+
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.resignFirstResponder()
+    }
+
+    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+
+        if query.isEmpty {
+            detailModels = unfilteredModels
+        } else {
+            // row 0 is the height-0 URL row the header cell renders — always keep it
+            detailModels = Array(unfilteredModels.prefix(1)) + unfilteredModels.dropFirst().filter { model in
+                (model.title ?? "").localizedCaseInsensitiveContains(query)
+                    || (model.content ?? "").localizedCaseInsensitiveContains(query)
+            }
+        }
+
+        tableView.reloadData()
     }
 }
 
