@@ -147,6 +147,10 @@ class NetworkViewController: UIViewController {
 
         searchBar.applyCocoaDebugDarkStyle(tint: Color.mainGreen)
 
+        //same as the Details screen: dragging the list dismisses the keyboard (the tap-anywhere
+        //gesture and the Cancel button do it too)
+        tableView.keyboardDismissMode = .onDrag
+
         // HTTP-method filter lives on the search bar's built-in bookmark button: no new bar
         // button item (that would break combineBarItemsForGlass's hardcoded item layout) and
         // no scope bar (the storyboard pins this bar to 44pt and the table's top to a matching 44).
@@ -415,6 +419,24 @@ extension NetworkViewController: UISearchBarDelegate {
         //        dispatch_main_async_safe { [weak self] in
         self.tableView.reloadData()
         //        }
+    }
+
+    //Cancel is only offered while editing, so it never eats width from the field otherwise.
+    //It is also the only clear affordance here, since applyCocoaDebugDarkStyle turns off the
+    //field's built-in clear button to avoid two X's side by side.
+    func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
+        searchBar.setShowsCancelButton(true, animated: true)
+    }
+
+    func searchBarTextDidEndEditing(_ searchBar: UISearchBar) {
+        searchBar.setShowsCancelButton(false, animated: true)
+    }
+
+    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.text = nil
+        searchBar.resignFirstResponder()
+        //clears the persisted search word and restores the unfiltered list
+        self.searchBar(searchBar, textDidChange: "")
     }
 
     //filter by HTTP method. "All" clears it; the active one is checked here and shown in the navi title.
