@@ -54,16 +54,7 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
         let bar = UISearchBar()
         bar.delegate = self
         bar.placeholder = "Search in details"
-        //keep in sync with NetworkViewController's search bar.
-        //barStyle alone leaves a translucent grey bar and a grey input field, so bar and field
-        //are both painted flat black and the text/icon are set explicitly against them.
-        bar.barStyle = .black
-        bar.tintColor = Color.mainGreen
-        bar.barTintColor = .black
-        bar.backgroundImage = UIImage()
-        bar.searchTextField.backgroundColor = .black
-        bar.searchTextField.textColor = .white
-        bar.searchTextField.leftView?.tintColor = .lightGray
+        bar.applyCocoaDebugDarkStyle(tint: Color.mainGreen)
         return bar
     }()
     private lazy var headerContainer: UIView = {

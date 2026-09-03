@@ -145,14 +145,7 @@ class NetworkViewController: UIViewController {
         searchBar.text = CocoaDebugSettings.shared.networkSearchWord
         searchBar.isHidden = true
 
-        //keep in sync with NetworkDetailViewController's search bar: the debugger's table, nav
-        //bar and cells are all black, and this field used to be painted white on its own.
-        //barStyle alone leaves a translucent grey bar and a grey input field, so bar and field
-        //are both painted flat black and the text/icon are set explicitly against them.
-        searchBar.barStyle = .black
-        searchBar.tintColor = Color.mainGreen
-        searchBar.barTintColor = .black
-        searchBar.backgroundImage = UIImage()
+        searchBar.applyCocoaDebugDarkStyle(tint: Color.mainGreen)
 
         // HTTP-method filter lives on the search bar's built-in bookmark button: no new bar
         // button item (that would break combineBarItemsForGlass's hardcoded item layout) and
@@ -160,15 +153,10 @@ class NetworkViewController: UIViewController {
         searchBar.showsBookmarkButton = true
         updateMethodFilterIcon()
         
-        //keep the magnifier: it used to be stripped here, which left this bar the only search
-        //field in the debugger without one. searchTextField is the iOS 13+ API for what was a
-        //`value(forKey: "searchField") as! UITextField` force-cast.
-        let textFieldInsideSearchBar = searchBar.searchTextField
-        textFieldInsideSearchBar.leftViewMode = .always
-        textFieldInsideSearchBar.backgroundColor = .black
-        textFieldInsideSearchBar.textColor = .white
-        textFieldInsideSearchBar.leftView?.tintColor = .lightGray
-        textFieldInsideSearchBar.returnKeyType = .default
+        //the magnifier used to be stripped here, which left this bar the only search field in
+        //the debugger without one; applyCocoaDebugDarkStyle restores it. searchTextField is the
+        //iOS 13+ API for what was a `value(forKey: "searchField") as! UITextField` force-cast.
+        searchBar.searchTextField.returnKeyType = .default
         
         reloadHttp(needScrollToEnd: true)
         
@@ -376,6 +364,38 @@ extension NetworkViewController: UIScrollViewDelegate {
             //bottom reached
             reachEnd = true
         }
+    }
+}
+
+//MARK: - shared search bar styling
+extension UISearchBar {
+
+    /// One definition of the debugger's search bar look, used by both the network list and the
+    /// request Details screen so they cannot drift apart.
+    func applyCocoaDebugDarkStyle(tint: UIColor) {
+        barStyle = .black          //dark keyboard
+        tintColor = tint           //caret and Cancel
+        barTintColor = .black
+
+        //backgroundImage makes the bar TRANSPARENT rather than black, which let the host
+        //view's white background show around the field — so paint the bar itself too
+        backgroundImage = UIImage()
+        backgroundColor = .black
+
+        searchTextField.backgroundColor = .black
+        searchTextField.textColor = .white
+        searchTextField.leftViewMode = .always
+        searchTextField.leftView?.tintColor = .lightGray
+
+        //the Cancel button already clears the text AND dismisses the keyboard, so the field's
+        //own clear button is a second X sitting right next to it
+        searchTextField.clearButtonMode = .never
+
+        //black field on a black bar has no edge of its own; give it one
+        searchTextField.layer.borderWidth = 1
+        searchTextField.layer.borderColor = UIColor.darkGray.cgColor
+        searchTextField.layer.cornerRadius = 10
+        searchTextField.clipsToBounds = true
     }
 }
 
