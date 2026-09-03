@@ -118,9 +118,33 @@ class NetworkDetailCell: UITableViewCell {
     
     
     //MARK: - search highlighting
-    //Call after assigning detailModel. Every occurrence of `query` in the content gets a
-    //highlight; an empty query restores the plain rendering.
-    func highlight(_ query: String) {
+    //Every occurrence of `query` in `content`, case-insensitively. Ranges are UTF-16, which is
+    //what NSAttributedString wants. Shared with NetworkDetailViewController's match list so
+    //the cell's highlighting and the match counter can never disagree.
+    static func ranges(of query: String, in content: String) -> [NSRange] {
+        guard !query.isEmpty, !content.isEmpty else {return []}
+
+        var found: [NSRange] = []
+        let nsContent = content as NSString
+        var searchRange = NSRange(location: 0, length: nsContent.length)
+
+        while searchRange.length > 0 {
+            let match = nsContent.range(of: query, options: .caseInsensitive, range: searchRange)
+            if match.location == NSNotFound {break}
+
+            found.append(match)
+
+            let next = match.location + match.length
+            searchRange = NSRange(location: next, length: nsContent.length - next)
+        }
+
+        return found
+    }
+
+    //Call after assigning detailModel. Every occurrence of `query` is highlighted; `current`
+    //(the match the up/down arrows are parked on) gets a stronger colour. Empty query restores
+    //the plain rendering.
+    func highlight(_ query: String, current: NSRange? = nil) {
         guard let content = detailModel?.content, !content.isEmpty else {return}
 
         let base: [NSAttributedString.Key: Any] = [
@@ -136,18 +160,11 @@ class NetworkDetailCell: UITableViewCell {
         }
 
         let attributed = NSMutableAttributedString(string: content, attributes: base)
-        let nsContent = content as NSString
-        var searchRange = NSRange(location: 0, length: nsContent.length)
 
-        while searchRange.length > 0 {
-            let found = nsContent.range(of: query, options: .caseInsensitive, range: searchRange)
-            if found.location == NSNotFound {break}
-
-            attributed.addAttributes([.backgroundColor: UIColor.systemYellow,
-                                      .foregroundColor: UIColor.black], range: found)
-
-            let next = found.location + found.length
-            searchRange = NSRange(location: next, length: nsContent.length - next)
+        for match in NetworkDetailCell.ranges(of: query, in: content) {
+            let isCurrent = current.map { NSEqualRanges($0, match) } ?? false
+            attributed.addAttributes([.backgroundColor: isCurrent ? UIColor.systemOrange : UIColor.systemYellow,
+                                      .foregroundColor: UIColor.black], range: match)
         }
 
         contentTextView.attributedText = attributed

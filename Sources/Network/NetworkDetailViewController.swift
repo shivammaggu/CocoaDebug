@@ -63,6 +63,46 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
         container.backgroundColor = .black
         return container
     }()
+
+    // Every match across the filtered sections, in document order, so the arrows can walk them.
+    private struct Match {
+        let row: Int
+        let range: NSRange
+    }
+    private var matches: [Match] = []
+    private var currentMatch: Int = 0
+
+    private let matchBarHeight: CGFloat = 32
+    private var matchBarHeightConstraint: NSLayoutConstraint?
+
+    private lazy var matchLabel: UILabel = {
+        let label = UILabel()
+        label.textColor = Color.mainGreen
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        return label
+    }()
+    private lazy var prevMatchButton: UIButton = makeMatchButton("chevron.up", #selector(didTapPrevMatch))
+    private lazy var nextMatchButton: UIButton = makeMatchButton("chevron.down", #selector(didTapNextMatch))
+    private lazy var matchBar: UIStackView = {
+        let spacer = UIView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let stack = UIStackView(arrangedSubviews: [matchLabel, spacer, prevMatchButton, nextMatchButton])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 16
+        stack.isLayoutMarginsRelativeArrangement = true
+        stack.layoutMargins = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
+        return stack
+    }()
+
+    private func makeMatchButton(_ symbol: String, _ action: Selector) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: symbol), for: .normal)
+        button.tintColor = Color.mainGreen
+        button.addTarget(self, action: action, for: .touchUpInside)
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        return button
+    }
     
     static func instanceFromStoryBoard() -> NetworkDetailViewController {
         let storyboard = UIStoryboard(name: "Network", bundle: Bundle(for: CocoaDebug.self))
@@ -423,6 +463,10 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
         //Search key do it too (searchBarCancelButtonClicked / searchBarSearchButtonClicked)
         tableView.keyboardDismissMode = .onDrag
 
+        //iOS 15+ inserts padding above every plain-style section header, which showed up as a
+        //gap above the search bar now that the bar lives in the header
+        tableView.sectionHeaderTopPadding = 0
+
         //Use a separate xib-cell file, must be registered, otherwise it will crash
         let bundle = Bundle(for: type(of: self))
         let nib = UINib(nibName: "NetworkCell", bundle: bundle)
@@ -457,6 +501,74 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
         }
     }
     
+    //MARK: - search matches
+    //Rebuilds the match list over the CURRENTLY FILTERED sections, so `row` indexes
+    //detailModels directly. Row 0 is skipped: it is the height-0 URL row, so a match there
+    //could never be scrolled into view.
+    private func recomputeMatches() {
+        matches = []
+        currentMatch = 0
+
+        guard !searchQuery.isEmpty else {return}
+
+        for row in 1..<max(1, detailModels.count) {
+            guard let content = detailModels[row].content else {continue}
+            for range in NetworkDetailCell.ranges(of: searchQuery, in: content) {
+                matches.append(Match(row: row, range: range))
+            }
+        }
+    }
+
+    private func updateMatchBar() {
+        matchBarHeightConstraint?.constant = searchQuery.isEmpty ? 0 : matchBarHeight
+        matchBar.isHidden = searchQuery.isEmpty
+
+        if matches.isEmpty {
+            matchLabel.text = searchQuery.isEmpty ? nil : "No matches"
+        } else {
+            matchLabel.text = "\(currentMatch + 1) of \(matches.count)"
+        }
+
+        prevMatchButton.isEnabled = matches.count > 1
+        nextMatchButton.isEnabled = matches.count > 1
+    }
+
+    @objc private func didTapPrevMatch() {
+        stepMatch(-1)
+    }
+
+    @objc private func didTapNextMatch() {
+        stepMatch(1)
+    }
+
+    //wraps around, so you can keep tapping in one direction
+    private func stepMatch(_ delta: Int) {
+        guard !matches.isEmpty else {return}
+
+        currentMatch = (currentMatch + delta + matches.count) % matches.count
+        updateMatchBar()
+        tableView.reloadData()
+        scrollToCurrentMatch()
+    }
+
+    private func scrollToCurrentMatch() {
+        guard currentMatch < matches.count else {return}
+
+        let row = matches[currentMatch].row
+        guard row < detailModels.count else {return}
+
+        //.middle, not .top: the section header floats over the top of the content
+        tableView.scrollToRow(at: IndexPath(row: row, section: 0), at: .middle, animated: true)
+    }
+
+    //the current match, if it falls in this row — the cell paints it a stronger colour
+    private func currentRange(forRow row: Int) -> NSRange? {
+        guard currentMatch < matches.count else {return nil}
+
+        let match = matches[currentMatch]
+        return match.row == row ? match.range : nil
+    }
+
     //MARK: - target action
     @IBAction func close(_ sender: UIBarButtonItem) {
         (self.navigationController as! CocoaDebugNavigationController).exit()
@@ -572,7 +684,10 @@ extension NetworkDetailViewController: UISearchBarDelegate {
             }
         }
 
+        recomputeMatches()
+        updateMatchBar()
         tableView.reloadData()
+        scrollToCurrentMatch()
     }
 }
 
@@ -589,7 +704,7 @@ extension NetworkDetailViewController {
         
         let detailModel = detailModels[indexPath.row]
         cell.detailModel = detailModel
-        cell.highlight(searchQuery)
+        cell.highlight(searchQuery, current: currentRange(forRow: indexPath.row))
 
         // Hide top line divider for response chunks (after the first one) - set after detailModel
         let isResponseChunk = detailModel.blankContent == "response_chunk"
@@ -646,9 +761,14 @@ extension NetworkDetailViewController {
 
         if searchBar.superview !== headerContainer {
             searchBar.translatesAutoresizingMaskIntoConstraints = false
+            matchBar.translatesAutoresizingMaskIntoConstraints = false
             content.translatesAutoresizingMaskIntoConstraints = false
             headerContainer.addSubview(searchBar)
+            headerContainer.addSubview(matchBar)
             headerContainer.addSubview(content)
+
+            let matchHeight = matchBar.heightAnchor.constraint(equalToConstant: 0)
+            matchBarHeightConstraint = matchHeight
 
             NSLayoutConstraint.activate([
                 searchBar.topAnchor.constraint(equalTo: headerContainer.topAnchor),
@@ -656,11 +776,18 @@ extension NetworkDetailViewController {
                 searchBar.trailingAnchor.constraint(equalTo: headerContainer.trailingAnchor),
                 searchBar.heightAnchor.constraint(equalToConstant: searchBarHeight),
 
-                content.topAnchor.constraint(equalTo: searchBar.bottomAnchor),
+                matchBar.topAnchor.constraint(equalTo: searchBar.bottomAnchor),
+                matchBar.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor),
+                matchBar.trailingAnchor.constraint(equalTo: headerContainer.trailingAnchor),
+                matchHeight,
+
+                content.topAnchor.constraint(equalTo: matchBar.bottomAnchor),
                 content.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor),
                 content.trailingAnchor.constraint(equalTo: headerContainer.trailingAnchor),
                 content.bottomAnchor.constraint(equalTo: headerContainer.bottomAnchor)
             ])
+
+            updateMatchBar()
         }
 
         return headerContainer
@@ -687,7 +814,7 @@ extension NetworkDetailViewController {
     override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
         //the search bar is part of this header, so it must be counted even when the URL
         //block measures to 0 — otherwise the header collapses and the search bar vanishes
-        return urlHeaderHeight() + searchBarHeight
+        return urlHeaderHeight() + searchBarHeight + (searchQuery.isEmpty ? 0 : matchBarHeight)
     }
 
     private func urlHeaderHeight() -> CGFloat {
