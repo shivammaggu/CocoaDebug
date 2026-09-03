@@ -59,10 +59,21 @@ class NetworkViewController: UIViewController {
     }
 
     //filter funnel in the bookmark slot — filled while a method filter is on, so the icon
-    //itself reports the state even if the navi title truncates on iOS 26's glass bar
+    //itself reports the state even if the navi title truncates on iOS 26's glass bar.
+    //
+    //setImage(_:for:.bookmark) predates SF Symbols: a bare UIImage(systemName:) has no point
+    //size and no baked colour in that slot and draws nothing at all, which is why the button
+    //looked absent. An explicit SymbolConfiguration plus withTintColor(.alwaysOriginal) gives
+    //it both. If the symbol is ever unavailable we leave the default glyph in place rather
+    //than replacing it with nothing.
     private func updateMethodFilterIcon() {
         let name = methodFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill"
-        searchBar.setImage(UIImage(systemName: name), for: .bookmark, state: .normal)
+        let configuration = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+
+        guard let icon = UIImage(systemName: name, withConfiguration: configuration)?
+            .withTintColor(Color.mainGreen, renderingMode: .alwaysOriginal) else {return}
+
+        searchBar.setImage(icon, for: .bookmark, state: .normal)
     }
 
     //MARK: - private
