@@ -145,6 +145,11 @@ class NetworkViewController: UIViewController {
         searchBar.text = CocoaDebugSettings.shared.networkSearchWord
         searchBar.isHidden = true
 
+        //keep in sync with NetworkDetailViewController's search bar: the debugger's table, nav
+        //bar and cells are all black, and this field used to be painted white on its own
+        searchBar.barStyle = .black
+        searchBar.tintColor = Color.mainGreen
+
         // HTTP-method filter lives on the search bar's built-in bookmark button: no new bar
         // button item (that would break combineBarItemsForGlass's hardcoded item layout) and
         // no scope bar (the storyboard pins this bar to 44pt and the table's top to a matching 44).
@@ -156,7 +161,6 @@ class NetworkViewController: UIViewController {
         //`value(forKey: "searchField") as! UITextField` force-cast.
         let textFieldInsideSearchBar = searchBar.searchTextField
         textFieldInsideSearchBar.leftViewMode = .always
-        textFieldInsideSearchBar.backgroundColor = .white
         textFieldInsideSearchBar.returnKeyType = .default
         
         reloadHttp(needScrollToEnd: true)
