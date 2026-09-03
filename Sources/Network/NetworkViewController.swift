@@ -146,9 +146,13 @@ class NetworkViewController: UIViewController {
         searchBar.isHidden = true
 
         //keep in sync with NetworkDetailViewController's search bar: the debugger's table, nav
-        //bar and cells are all black, and this field used to be painted white on its own
+        //bar and cells are all black, and this field used to be painted white on its own.
+        //barStyle alone leaves a translucent grey bar and a grey input field, so bar and field
+        //are both painted flat black and the text/icon are set explicitly against them.
         searchBar.barStyle = .black
         searchBar.tintColor = Color.mainGreen
+        searchBar.barTintColor = .black
+        searchBar.backgroundImage = UIImage()
 
         // HTTP-method filter lives on the search bar's built-in bookmark button: no new bar
         // button item (that would break combineBarItemsForGlass's hardcoded item layout) and
@@ -161,8 +165,9 @@ class NetworkViewController: UIViewController {
         //`value(forKey: "searchField") as! UITextField` force-cast.
         let textFieldInsideSearchBar = searchBar.searchTextField
         textFieldInsideSearchBar.leftViewMode = .always
-        //barStyle alone does not reliably give white input text; set it explicitly
+        textFieldInsideSearchBar.backgroundColor = .black
         textFieldInsideSearchBar.textColor = .white
+        textFieldInsideSearchBar.leftView?.tintColor = .lightGray
         textFieldInsideSearchBar.returnKeyType = .default
         
         reloadHttp(needScrollToEnd: true)
