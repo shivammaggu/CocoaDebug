@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import UIKit
 
 extension Dictionary {
     ///JSON/Form format conversion
@@ -390,4 +391,38 @@ extension CocoaDebug {
     }
 }
 
+//MARK: - shared search bar styling
+extension UISearchBar {
 
+    /// One definition of the debugger's search bar look, shared by the network list and the
+    /// request Details screen so the two cannot drift apart. Lives here rather than in either
+    /// screen, since belonging to one of them is what drift looks like.
+    func applyCocoaDebugDarkStyle(tint: UIColor) {
+        barStyle = .black          //dark keyboard
+        tintColor = tint           //caret
+        barTintColor = .black
+
+        //backgroundImage makes the bar TRANSPARENT rather than black, which let the host
+        //view's white background show around the field — so paint the bar itself too
+        backgroundImage = UIImage()
+        backgroundColor = .black
+
+        searchTextField.backgroundColor = .black
+        searchTextField.textColor = .white
+        searchTextField.leftViewMode = .always
+        searchTextField.leftView?.tintColor = .lightGray
+
+        //.always, not .whileEditing: keyboardDismissMode = .onDrag ends editing the moment you
+        //scroll the results, so a while-editing X vanishes exactly when you want to clear.
+        //This is the only clear affordance on either screen. A Cancel button used to sit here
+        //instead and was dropped: dragging already dismisses the keyboard, which was the one
+        //thing Cancel did that the clear button does not.
+        searchTextField.clearButtonMode = .always
+
+        //black field on a black bar has no edge of its own; give it one
+        searchTextField.layer.borderWidth = 1
+        searchTextField.layer.borderColor = UIColor.darkGray.cgColor
+        searchTextField.layer.cornerRadius = 10
+        searchTextField.clipsToBounds = true
+    }
+}

@@ -21,6 +21,13 @@ class NetworkViewController: UIViewController {
     var naviItemTitleLabel: UILabel?
     private var didCombineGlassBar = false
 
+    // nil = no method filter. NOTE: not persisted in CocoaDebugSettings — resets when the
+    // debugger is reopened, which is what you want from a transient filter.
+    private var methodFilter: String?
+
+    // request -> its position in the unfiltered capture list, so the row number is stable
+    private var stableIndex: [ObjectIdentifier: Int] = [:]
+
     @IBOutlet weak var tableView: UITableView!
     @IBOutlet weak var searchBar: UISearchBar!
     @IBOutlet weak var deleteItem: UIBarButtonItem!
@@ -30,24 +37,59 @@ class NetworkViewController: UIViewController {
     //搜索逻辑
     func searchLogic(_ searchText: String = "") {
         guard let cacheModels = cacheModels else {return}
-        searchModels = cacheModels
-        
-        if searchText == "" {
-            models = cacheModels
-        } else {
-            guard let searchModels = searchModels else {return}
-            
-            for _ in searchModels {
-                if let index = self.searchModels?.firstIndex(where: { (model) -> Bool in
-                    return !model.url.absoluteString.lowercased().contains(searchText.lowercased())//忽略大小写
-                }) {
-                    self.searchModels?.remove(at: index)
-                }
-            }
-            models = self.searchModels
+
+        //忽略大小写 (range(of:options:) rather than lowercased(), which allocated a copy of
+        //every URL on every keystroke)
+        searchModels = cacheModels.filter { model in
+            (searchText.isEmpty || model.url.absoluteString.range(of: searchText, options: .caseInsensitive) != nil)
+                && (methodFilter == nil || model.method.uppercased() == methodFilter)
+        }
+        models = searchModels
+    }
+
+    //The number drawn on each row is the request's position in the FULL capture list, not its
+    //row in the filtered list — otherwise applying or clearing a filter renumbers every request
+    //and the same call answers to a different number.
+    //
+    //Keyed by object identity, which is only sound while the keys are alive: ObjectIdentifier
+    //does NOT retain, and a freed _HttpModel's address can be handed straight to a new one,
+    //which would produce a plausible but wrong row number. What holds the keys alive is
+    //`cacheModels` — it owns the very instances the map describes, and `models` is always a
+    //subset of those. So the invariant is: REBUILD ON EVERY REASSIGNMENT OF cacheModels.
+    //reloadHttp and tapTrashButton are the only two places that reassign it.
+    private func rebuildStableIndex() {
+        stableIndex = [:]
+        for (position, model) in (cacheModels ?? []).enumerated() {
+            stableIndex[ObjectIdentifier(model)] = position
         }
     }
-    
+
+    //filter funnel in the bookmark slot — filled while a method filter is on, so the icon
+    //itself reports the state even if the navi title truncates on iOS 26's glass bar.
+    //
+    //setImage(_:for:.bookmark) predates SF Symbols: a bare UIImage(systemName:) has no point
+    //size and no baked colour in that slot and draws nothing at all, which is why the button
+    //looked absent. An explicit SymbolConfiguration plus withTintColor(.alwaysOriginal) gives
+    //it both. If the symbol is ever unavailable we leave the default glyph in place rather
+    //than replacing it with nothing.
+    private func updateMethodFilterIcon() {
+        let name = methodFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill"
+        let configuration = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+
+        guard let icon = UIImage(systemName: name, withConfiguration: configuration)?
+            .withTintColor(Color.mainGreen, renderingMode: .alwaysOriginal) else {return}
+
+        searchBar.setImage(icon, for: .bookmark, state: .normal)
+    }
+
+    //Single writer for the navi title: request count plus the active method filter, so a
+    //filtered list can never be mistaken for an empty one. tapTrashButton used to write
+    //"🚀[0]" directly and dropped the suffix while the filter was still armed.
+    private func updateNaviTitle(count: Int) {
+        naviItemTitleLabel?.text = "🚀[" + String(count) + "]" + (methodFilter.map { " " + $0 } ?? "")
+        naviItemTitleLabel?.sizeToFit()
+    }
+
     //MARK: - private
     func reloadHttp(needScrollToEnd: Bool = false) {
         
@@ -59,7 +101,8 @@ class NetworkViewController: UIViewController {
         
         self.models = (_HttpDatasource.shared().httpModels as NSArray as? [_HttpModel])
         self.cacheModels = self.models
-        
+        self.rebuildStableIndex()
+
         self.searchLogic(CocoaDebugSettings.shared.networkSearchWord ?? "")
         
         //        dispatch_main_async_safe { [weak self] in
@@ -126,13 +169,24 @@ class NetworkViewController: UIViewController {
         searchBar.delegate = self
         searchBar.text = CocoaDebugSettings.shared.networkSearchWord
         searchBar.isHidden = true
+
+        searchBar.applyCocoaDebugDarkStyle(tint: Color.mainGreen)
+
+        //same as the Details screen: dragging the list dismisses the keyboard (the tap-anywhere
+        //gesture does it too); the field's clear button clears the query
+        tableView.keyboardDismissMode = .onDrag
+
+        // HTTP-method filter lives on the search bar's built-in bookmark button: no new bar
+        // button item (that would break combineBarItemsForGlass's hardcoded item layout) and
+        // no scope bar (the storyboard pins this bar to 44pt and the table's top to a matching 44).
+        searchBar.showsBookmarkButton = true
+        updateMethodFilterIcon()
         
-        //hide searchBar icon
-        let textFieldInsideSearchBar = searchBar.value(forKey: "searchField") as! UITextField
-        textFieldInsideSearchBar.leftViewMode = .never
-        textFieldInsideSearchBar.leftView = nil
-        textFieldInsideSearchBar.backgroundColor = .white
-        textFieldInsideSearchBar.returnKeyType = .default
+        //the magnifier used to be stripped here, which left this bar the only search field in
+        //the debugger without one; applyCocoaDebugDarkStyle restores it. searchTextField is the
+        //iOS 13+ API for what was a `value(forKey: "searchField") as! UITextField` force-cast
+        //(the podspec's deployment target is 15.0, so the KVC workaround is long dead).
+        searchBar.searchTextField.returnKeyType = .default
         
         reloadHttp(needScrollToEnd: true)
         
@@ -225,6 +279,10 @@ class NetworkViewController: UIViewController {
         _HttpDatasource.shared().reset()
         models = []
         cacheModels = []
+        //cacheModels was just reassigned, so the identity map has to go with it — see
+        //rebuildStableIndex. Leaving stale keys behind is what lets a recycled address be
+        //read as an old request's row number.
+        rebuildStableIndex()
         //        searchBar.text = nil
         searchBar.resignFirstResponder()
         //        CocoaDebugSettings.shared.networkSearchWord = nil
@@ -232,8 +290,7 @@ class NetworkViewController: UIViewController {
         
         //        dispatch_main_async_safe { [weak self] in
         self.tableView.reloadData()
-        self.naviItemTitleLabel?.text = "🚀[0]"
-        self.naviItemTitleLabel?.sizeToFit()
+        self.updateNaviTitle(count: 0)
         //        }
         
         NotificationCenter.default.post(name: NSNotification.Name("deleteAllLogs_CocoaDebug"), object: nil, userInfo: nil)
@@ -248,20 +305,19 @@ class NetworkViewController: UIViewController {
 extension NetworkViewController: UITableViewDataSource {
     
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        if let count = models?.count {
-            naviItemTitleLabel?.text = "🚀[" + String(count) + "]"
-            naviItemTitleLabel?.sizeToFit()
-            return count
-        }
-        return 0
+        let count = models?.count ?? 0
+        updateNaviTitle(count: count)
+        return count
     }
     
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "NetworkCell", for: indexPath)
             as! NetworkCell
         
-        cell.httpModel = models?[indexPath.row]
-        cell.index = indexPath.row
+        let model = models?[indexPath.row]
+        cell.httpModel = model
+        //falls back to the row only if the map is stale (nothing should hit this)
+        cell.index = model.flatMap { stableIndex[ObjectIdentifier($0)] } ?? indexPath.row
         return cell
     }
 }
@@ -352,9 +408,41 @@ extension NetworkViewController: UISearchBarDelegate {
     {
         CocoaDebugSettings.shared.networkSearchWord = searchText
         searchLogic(searchText)
-        
+
         //        dispatch_main_async_safe { [weak self] in
         self.tableView.reloadData()
         //        }
+    }
+
+    //filter by HTTP method. "All" clears it; the active one is checked here and shown in the navi title.
+    func searchBarBookmarkButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.resignFirstResponder()
+
+        //only offer methods actually present in the captured traffic, plus whatever is already
+        //selected (the trash button can empty out the method you are filtering on)
+        let methods = Set((cacheModels ?? []).map { $0.method.uppercased() })
+            .union(methodFilter.map { [$0] } ?? [])
+            .sorted()
+
+        let alert = UIAlertController(title: "Filter by HTTP method", message: nil, preferredStyle: .actionSheet)
+
+        for title in ["All"] + methods {
+            let isActive = (title == "All") ? methodFilter == nil : methodFilter == title
+            let action = UIAlertAction(title: (isActive ? "✓ " : "") + title, style: .default) { [weak self] _ in
+                self?.methodFilter = (title == "All") ? nil : title
+                self?.updateMethodFilterIcon()
+                self?.searchLogic(searchBar.text ?? "")
+                self?.tableView.reloadData()
+            }
+            alert.addAction(action)
+        }
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        alert.popoverPresentationController?.permittedArrowDirections = .init(rawValue: 0)
+        alert.popoverPresentationController?.sourceView = self.view
+        alert.popoverPresentationController?.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.midY, width: 0, height: 0)
+
+        present(alert, animated: true, completion: nil)
     }
 }

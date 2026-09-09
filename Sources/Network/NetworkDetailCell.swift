@@ -31,7 +31,12 @@ class NetworkDetailCell: UITableViewCell {
     }
     
     var tapEditViewCallback:((NetworkDetailModel?) -> Void)?
-    
+
+    //captured once: assigning attributedText can overwrite the text view's own font/textColor,
+    //and the storyboard values are the only record of them (white-on-black would go black-on-black)
+    private var baseFont: UIFont?
+    private var baseTextColor: UIColor?
+
     var detailModel: NetworkDetailModel? {
         didSet {
             
@@ -94,7 +99,10 @@ class NetworkDetailCell: UITableViewCell {
         super.awakeFromNib()
         
         editView.addGestureRecognizer(UITapGestureRecognizer.init(target: self, action: #selector(tapEditView)))
-        
+
+        baseFont = contentTextView.font
+        baseTextColor = contentTextView.textColor
+
         contentTextView.textContainer.lineFragmentPadding = 0
         contentTextView.textContainerInset = .zero
         contentTextView.isScrollEnabled = false
@@ -109,6 +117,60 @@ class NetworkDetailCell: UITableViewCell {
     }
     
     
+    //MARK: - search highlighting
+    //Every occurrence of `query` in `content`, case-insensitively. Ranges are UTF-16, which is
+    //what NSAttributedString wants. Shared with NetworkDetailViewController's match list so
+    //the cell's highlighting and the match counter can never disagree.
+    static func ranges(of query: String, in content: String) -> [NSRange] {
+        guard !query.isEmpty, !content.isEmpty else {return []}
+
+        var found: [NSRange] = []
+        let nsContent = content as NSString
+        var searchRange = NSRange(location: 0, length: nsContent.length)
+
+        while searchRange.length > 0 {
+            let match = nsContent.range(of: query, options: .caseInsensitive, range: searchRange)
+            if match.location == NSNotFound {break}
+
+            found.append(match)
+
+            let next = match.location + match.length
+            searchRange = NSRange(location: next, length: nsContent.length - next)
+        }
+
+        return found
+    }
+
+    //Call after assigning detailModel. Every occurrence of `query` is highlighted; an empty
+    //query restores the plain rendering.
+    func highlight(_ query: String) {
+        //NOT a guard-and-return on empty content: a reused cell whose new content is empty
+        //would keep the PREVIOUS row's attributedText, which is exactly the black-on-black
+        //case baseFont/baseTextColor are captured to prevent. Empty still has to be repainted.
+        let content = detailModel?.content ?? ""
+
+        let base: [NSAttributedString.Key: Any] = [
+            .font: baseFont ?? contentTextView.font ?? UIFont.systemFont(ofSize: 13),
+            .foregroundColor: baseTextColor ?? contentTextView.textColor ?? .white
+        ]
+
+        guard !query.isEmpty else {
+            //restore: detailModel's setter already assigned .text, but a previous
+            //attributedText may have left the font/colour on the matched word
+            contentTextView.attributedText = NSAttributedString(string: content, attributes: base)
+            return
+        }
+
+        let attributed = NSMutableAttributedString(string: content, attributes: base)
+
+        for match in NetworkDetailCell.ranges(of: query, in: content) {
+            attributed.addAttributes([.backgroundColor: UIColor.systemYellow,
+                                      .foregroundColor: UIColor.black], range: match)
+        }
+
+        contentTextView.attributedText = attributed
+    }
+
     //MARK: - target action
     //edit
     @objc func tapEditView() {
