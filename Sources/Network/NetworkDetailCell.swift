@@ -144,7 +144,10 @@ class NetworkDetailCell: UITableViewCell {
     //Call after assigning detailModel. Every occurrence of `query` is highlighted; an empty
     //query restores the plain rendering.
     func highlight(_ query: String) {
-        guard let content = detailModel?.content, !content.isEmpty else {return}
+        //NOT a guard-and-return on empty content: a reused cell whose new content is empty
+        //would keep the PREVIOUS row's attributedText, which is exactly the black-on-black
+        //case baseFont/baseTextColor are captured to prevent. Empty still has to be repainted.
+        let content = detailModel?.content ?? ""
 
         let base: [NSAttributedString.Key: Any] = [
             .font: baseFont ?? contentTextView.font ?? UIFont.systemFont(ofSize: 13),

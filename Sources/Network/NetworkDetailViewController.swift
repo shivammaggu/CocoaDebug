@@ -39,8 +39,10 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
 
     // Search filters the sections down to the ones containing the text, and every match inside
     // them is highlighted by the cell.
-    // ponytail: a match straddling two response chunks is still missed — the chunks are
-    // searched independently. Search the unchunked content if that ever bites.
+    // NOTE: a match straddling two response chunks is still missed, and therefore also
+    // undercounted — the chunks are scanned independently. completeResponseContent holds the
+    // unchunked string, but counting against THAT would report matches the per-chunk cells
+    // cannot highlight, which is the disagreement applySearch()'s single scan exists to avoid.
     private var unfilteredModels: [NetworkDetailModel] = []
     private var searchQuery: String = ""
 
@@ -292,7 +294,10 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
         var string: String = ""
         messageBody = ""
         
-        for model in detailModels {
+        //unfilteredModels, NOT detailModels: with a search active detailModels is only the
+        //matching sections, and exporting from that silently ships a truncated report into
+        //whatever bug ticket this ends up in
+        for model in unfilteredModels {
             if let title = model.title {
                 // For RESPONSE, use the complete response content instead of chunked content
                 if title == "RESPONSE", let completeResponse = completeResponseContent, completeResponse != "" {
@@ -432,8 +437,8 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
 
         unfilteredModels = detailModels
 
-        //dragging the list dismisses the keyboard; the Cancel button and the keyboard's
-        //Search key do it too (searchBarCancelButtonClicked / searchBarSearchButtonClicked)
+        //dragging the list dismisses the keyboard, as does the keyboard's own Search key
+        //(searchBarSearchButtonClicked); clearing the query is the field's clear button
         tableView.keyboardDismissMode = .onDrag
 
         //iOS 15+ inserts padding above every plain-style section header, which showed up as a
@@ -448,6 +453,8 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
         //header
         headerCell = bundle.loadNibNamed(String(describing: NetworkCell.self), owner: nil, options: nil)?.first as? NetworkCell
         headerCell?.httpModel = httpModel
+
+        setupHeaderContainer()
         
         // Configure automatic height calculation for long content
         tableView.estimatedRowHeight = 200
@@ -458,6 +465,42 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
         tableView.estimatedSectionFooterHeight = 0
     }
     
+    //Search bar, match label and the URL/status block stacked into the floating section
+    //header (see the searchBar comment for why it lives there). Built once, so
+    //viewForHeaderInSection only has to hand the container back.
+    private func setupHeaderContainer() {
+        guard let content = headerCell?.contentView else {return}
+
+        searchBar.translatesAutoresizingMaskIntoConstraints = false
+        matchLabel.translatesAutoresizingMaskIntoConstraints = false
+        content.translatesAutoresizingMaskIntoConstraints = false
+        headerContainer.addSubview(searchBar)
+        headerContainer.addSubview(matchLabel)
+        headerContainer.addSubview(content)
+
+        let matchHeight = matchLabel.heightAnchor.constraint(equalToConstant: 0)
+        matchBarHeightConstraint = matchHeight
+
+        NSLayoutConstraint.activate([
+            searchBar.topAnchor.constraint(equalTo: headerContainer.topAnchor),
+            searchBar.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor),
+            searchBar.trailingAnchor.constraint(equalTo: headerContainer.trailingAnchor),
+            searchBar.heightAnchor.constraint(equalToConstant: searchBarHeight),
+
+            matchLabel.topAnchor.constraint(equalTo: searchBar.bottomAnchor),
+            matchLabel.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor, constant: 12),
+            matchLabel.trailingAnchor.constraint(lessThanOrEqualTo: headerContainer.trailingAnchor, constant: -12),
+            matchHeight,
+
+            content.topAnchor.constraint(equalTo: matchLabel.bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: headerContainer.trailingAnchor),
+            content.bottomAnchor.constraint(equalTo: headerContainer.bottomAnchor)
+        ])
+
+        updateMatchBar()
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         
@@ -474,18 +517,43 @@ class NetworkDetailViewController: UITableViewController, MFMailComposeViewContr
         }
     }
     
-    //MARK: - search matches
-    //Counts matches across the CURRENTLY FILTERED sections. Row 0 is skipped: it is the
-    //height-0 URL row, so a match there would be counted but never visible.
-    private func recomputeMatchCount() {
+    //MARK: - search
+    //ONE pass over the sections: a section is kept when its content has at least one match, and
+    //that same scan feeds the counter. Filtering, counting and the cell's highlighting now all
+    //come from NetworkDetailCell.ranges(of:in:) over the same `content`, so the visible rows
+    //and the "N matches" label cannot contradict each other.
+    //
+    //Titles are deliberately NOT a predicate: they are never highlighted, so a title match
+    //showed a section that the counter — and the cell — found nothing in.
+    @objc private func applySearch() {
         matchCount = 0
 
-        guard !searchQuery.isEmpty else {return}
+        if searchQuery.isEmpty {
+            detailModels = unfilteredModels
+        } else {
+            //row 0 is the height-0 URL row the header cell renders: always kept, never counted
+            //(a match there would be reported but could never be scrolled to)
+            var kept = Array(unfilteredModels.prefix(1))
 
-        for row in 1..<max(1, detailModels.count) {
-            guard let content = detailModels[row].content else {continue}
-            matchCount += NetworkDetailCell.ranges(of: searchQuery, in: content).count
+            for model in unfilteredModels.dropFirst() {
+                let hits = NetworkDetailCell.ranges(of: searchQuery, in: model.content ?? "").count
+                if hits > 0 {
+                    matchCount += hits
+                    kept.append(model)
+                }
+            }
+
+            //isLast draws the closing divider and was stamped on the last UNFILTERED model, so
+            //the last VISIBLE row lost its bottom line whenever a filter was active
+            for index in kept.indices {
+                kept[index].isLast = (index == kept.count - 1)
+            }
+
+            detailModels = kept
         }
+
+        updateMatchBar()
+        tableView.reloadData()
     }
 
     private func updateMatchBar() {
@@ -586,41 +654,20 @@ extension NetworkDetailViewController: UISearchBarDelegate {
         searchBar.resignFirstResponder()
     }
 
-    //Cancel is only offered while editing, so it never eats width from the field otherwise
-    func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
-        searchBar.setShowsCancelButton(true, animated: true)
-    }
-
-    func searchBarTextDidEndEditing(_ searchBar: UISearchBar) {
-        searchBar.setShowsCancelButton(false, animated: true)
-    }
-
-    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
-        searchBar.text = nil
-        searchBar.resignFirstResponder()
-        //clears the filter and the highlighting too
-        self.searchBar(searchBar, textDidChange: "")
-    }
-
     func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-        let query = searchText.trimmingCharacters(in: .whitespaces)
-        searchQuery = query
+        //trimmed only for the EMPTINESS test — whitespace is meaningful inside the query
+        //itself, since pretty-printed JSON is full of ": " and indentation worth searching for
+        searchQuery = searchText.trimmingCharacters(in: .whitespaces).isEmpty ? "" : searchText
 
-        if query.isEmpty {
-            detailModels = unfilteredModels
+        //a full content scan plus reloadData on every keystroke stutters on a multi-megabyte
+        //response, so coalesce the typing. Clearing stays immediate.
+        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(applySearch), object: nil)
+
+        if searchQuery.isEmpty {
+            applySearch()
         } else {
-            // row 0 is the height-0 URL row the header cell renders — always keep it
-            detailModels = Array(unfilteredModels.prefix(1)) + unfilteredModels.dropFirst().filter { model in
-                //content goes through the same scanner as the highlighting and the match
-                //counter, so "section shown" and "section has highlights" cannot disagree
-                (model.title ?? "").localizedCaseInsensitiveContains(query)
-                    || !NetworkDetailCell.ranges(of: query, in: model.content ?? "").isEmpty
-            }
+            perform(#selector(applySearch), with: nil, afterDelay: 0.25)
         }
-
-        recomputeMatchCount()
-        updateMatchBar()
-        tableView.reloadData()
     }
 }
 
@@ -690,39 +737,6 @@ extension NetworkDetailViewController {
     
     
     override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-        guard let content = headerCell?.contentView else {return searchBar}
-
-        if searchBar.superview !== headerContainer {
-            searchBar.translatesAutoresizingMaskIntoConstraints = false
-            matchLabel.translatesAutoresizingMaskIntoConstraints = false
-            content.translatesAutoresizingMaskIntoConstraints = false
-            headerContainer.addSubview(searchBar)
-            headerContainer.addSubview(matchLabel)
-            headerContainer.addSubview(content)
-
-            let matchHeight = matchLabel.heightAnchor.constraint(equalToConstant: 0)
-            matchBarHeightConstraint = matchHeight
-
-            NSLayoutConstraint.activate([
-                searchBar.topAnchor.constraint(equalTo: headerContainer.topAnchor),
-                searchBar.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor),
-                searchBar.trailingAnchor.constraint(equalTo: headerContainer.trailingAnchor),
-                searchBar.heightAnchor.constraint(equalToConstant: searchBarHeight),
-
-                matchLabel.topAnchor.constraint(equalTo: searchBar.bottomAnchor),
-                matchLabel.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor, constant: 12),
-                matchLabel.trailingAnchor.constraint(lessThanOrEqualTo: headerContainer.trailingAnchor, constant: -12),
-                matchHeight,
-
-                content.topAnchor.constraint(equalTo: matchLabel.bottomAnchor),
-                content.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor),
-                content.trailingAnchor.constraint(equalTo: headerContainer.trailingAnchor),
-                content.bottomAnchor.constraint(equalTo: headerContainer.bottomAnchor)
-            ])
-
-            updateMatchBar()
-        }
-
         return headerContainer
     }
     
@@ -758,23 +772,12 @@ extension NetworkDetailViewController {
         if let cString = httpModel?.url.absoluteString.cString(using: String.Encoding.utf8) {
             if let content_ = NSString(cString: cString, encoding: String.Encoding.utf8.rawValue) {
                 
-                if httpModel?.url.absoluteString.contains(serverURL) == true {
-                    //Calculate NSString height
-                    if #available(iOS 8.2, *) {
-                        height = content_.height(with: UIFont.systemFont(ofSize: 13, weight: .heavy), constraintToWidth: (UIScreen.main.bounds.size.width - 92))
-                    } else {
-                        // Fallback on earlier versions
-                        height = content_.height(with: UIFont.boldSystemFont(ofSize: 13), constraintToWidth: (UIScreen.main.bounds.size.width - 92))
-                    }
-                } else {
-                    //Calculate NSString height
-                    if #available(iOS 8.2, *) {
-                        height = content_.height(with: UIFont.systemFont(ofSize: 13, weight: .regular), constraintToWidth: (UIScreen.main.bounds.size.width - 92))
-                    } else {
-                        // Fallback on earlier versions
-                        height = content_.height(with: UIFont.systemFont(ofSize: 13), constraintToWidth: (UIScreen.main.bounds.size.width - 92))
-                    }
-                }
+                //the request's own server URL is drawn heavier than a third-party one.
+                //The old #available(iOS 8.2) fallbacks are gone: the pod's deployment target
+                //is 15.0, so they could never be taken.
+                let weight: UIFont.Weight = httpModel?.url.absoluteString.contains(serverURL) == true ? .heavy : .regular
+                height = content_.height(with: UIFont.systemFont(ofSize: 13, weight: weight),
+                                         constraintToWidth: (UIScreen.main.bounds.size.width - 92))
                 return height + 57
             }
         }
